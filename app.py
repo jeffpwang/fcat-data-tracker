@@ -8,10 +8,9 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="FCAT Data Validator (Strict)", layout="wide")
+st.set_page_config(page_title="FCAT Data Validator", layout="wide")
 
 st.title("Data Viability Tracker")
-st.markdown("**Status:** Strict Mode (No Simulations). Validating real API endpoints.")
 
 st.divider()
 
