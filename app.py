@@ -2,149 +2,212 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
+import urllib3
+
+# Disable SSL warnings for the "Nuclear" IMF fix
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Data Source Validator", layout="wide")
+st.set_page_config(page_title="FCAT Data Validator (Strict)", layout="wide")
 
 st.title("Data Viability Tracker")
-st.markdown("""
-This tool validates potential data sources against the project's **3 Core Criteria**:
-1. **Accessibility:** Can we connect via API?
-2. **Completeness:** Does it have the required dimensions (Time, Geo, Nodes)?
-3. **Visual Potential:** Is the data volatile and fresh enough for a wall display?
-""")
+st.markdown("**Status:** Strict Mode (No Simulations). Validating real API endpoints.")
 
 st.divider()
 
-# --- SIDEBAR: CONFIGURATION ---
-with st.sidebar:
-    st.header("Connection Settings")
-    # Check if the key exists in secrets.toml
-    if "FRED_API_KEY" in st.secrets:
-        api_key = st.secrets["FRED_API_KEY"]
-        st.success("API Key loaded automatically")
-    else:
-        # Fallback: Ask user if key is missing
-        api_key = st.text_input("FRED API Key", type="password")
-    st.header("Select Test Dataset")
+# ==========================================
+# 1. THE DATA CATALOG
+# ==========================================
+DATA_CATALOG = {
+    "FRED": {
+        "datasets": {
+            "US GDP": "GDP",
+            "Tech Output": "IPB51222S",
+            "Cloud Costs": "PCU518210518210",
+            "Bitcoin": "CBBTCUSD"
+        },
+        "type": "fred"
+    },
+    "CoinGecko": {
+        "datasets": {
+            "Bitcoin History": "bitcoin"
+        },
+        "type": "coingecko"
+    },
+    "IMF": {
+        "datasets": {
+            "Real GDP Growth (Global)": "https://www.imf.org/external/datamapper/api/v1/NGDP_RPCH"
+        },
+        "type": "imf"
+    },
+    "OECD": {
+        "datasets": {
+            "Quarterly National Accounts (US GDP)": "https://stats.oecd.org/SDMX-JSON/data/QNA/USA.B1_GE.CQR.A/all?startTime=2022-Q1"
+        },
+        "type": "oecd_strict"
+    }
+}
 
-    data_option = st.selectbox(
-        "Choose a Series to Test:",
-        [
-            "GDP (Standard Econ) - GDP", 
-            "Coinbase Bitcoin (Crypto Pulse) - CBBTCUSD", 
-            "Tech Hardware Output (Growth) - IPB51222S", 
-            "Cloud/Hosting Prices (Cost) - PCU518210518210", 
-            "US/Euro Exchange Rate (Global) - DEXUSEU"
-        ]
-    )
+# --- SIDEBAR ---
+with st.sidebar:
+    st.header("Configuration")
     
-    # Extract the Series ID from the selection
-    series_id = data_option.split(" - ")[-1]
+    selected_source = st.selectbox("Source:", list(DATA_CATALOG.keys()))
+    source_config = DATA_CATALOG[selected_source]
     
-    run_test = st.button("Run Viability Test", type="primary")
+    available_datasets = list(source_config["datasets"].keys())
+    selected_label = st.selectbox("Dataset:", available_datasets)
+    dataset_id = source_config["datasets"][selected_label]
+    
+    st.divider()
+    
+    api_key = None
+    if source_config["type"] == "fred":
+        if "FRED_API_KEY" in st.secrets:
+            api_key = st.secrets["FRED_API_KEY"]
+            st.success("🔑 Key Loaded")
+        else:
+            api_key = st.text_input("FRED API Key", type="password")
+
+    run_test = st.button("Run Validation", type="primary")
 
 # --- CORE LOGIC ---
-if run_test and api_key:
-    # 1. TEST ACCESSIBILITY
-    st.subheader("1. Accessibility Test")
+if run_test:
+    st.subheader(f"Validating: {selected_label}")
     
-    # Construct the API URL (The "Handshake")
-    url = f"https://api.stlouisfed.org/fred/series/observations?series_id={series_id}&api_key={api_key}&file_type=json"
+    df = None
+    raw_json = None
     
     try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            st.success(f"✅ PASS: Connection Successful (Status 200)")
-            data = response.json()
-            df = pd.DataFrame(data['observations'])
+        # ==========================================
+        # PATH A: FRED
+        # ==========================================
+        if source_config["type"] == "fred":
+            if not api_key:
+                st.error("❌ FAIL: API Key Required")
+                st.stop()
+            url = f"https://api.stlouisfed.org/fred/series/observations?series_id={dataset_id}&api_key={api_key}&file_type=json"
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                st.success("✅ Connection Successful")
+                df = pd.DataFrame(r.json()['observations'])
+                df['date'] = pd.to_datetime(df['date'])
+                df['value'] = pd.to_numeric(df['value'], errors='coerce')
+                df = df.dropna()
+            else:
+                st.error(f"❌ FAIL: Status {r.status_code}")
+
+        # ==========================================
+        # PATH B: COINGECKO
+        # ==========================================
+        elif source_config["type"] == "coingecko":
+            url = f"https://api.coingecko.com/api/v3/coins/{dataset_id}/market_chart?vs_currency=usd&days=30"
+            r = requests.get(url, headers={'User-Agent': 'FCAT_Validator'}, timeout=10)
+            if r.status_code == 200:
+                st.success("✅ Connection Successful")
+                data = r.json()
+                df = pd.DataFrame(data['prices'], columns=['timestamp', 'value'])
+                df['date'] = pd.to_datetime(df['timestamp'], unit='ms')
+            else:
+                st.error(f"❌ FAIL: Status {r.status_code}")
+
+        # ==========================================
+        # PATH C: IMF (NUCLEAR FIX)
+        # ==========================================
+        elif source_config["type"] == "imf":
+            url = dataset_id
+            st.markdown(f"`Requesting: {url}`")
+            # SSL Bypass + Long Timeout
+            r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, verify=False, timeout=45)
             
-            # Clean Data for Visualization
-            df['date'] = pd.to_datetime(df['date'])
-            df['value'] = pd.to_numeric(df['value'], errors='coerce')
-            df = df.dropna()
-            
-            # Show Raw Data Preview
-            with st.expander("Inspect Raw JSON Payload"):
-                st.json(data['observations'][0:5])
-                
+            if r.status_code == 200:
+                st.success("✅ Connection Successful")
+                raw_json = r.json()
+                # Parse
+                try:
+                    indicator = "NGDP_RPCH" 
+                    if indicator in raw_json['values']:
+                        usa_data = raw_json['values'][indicator].get('USA', {})
+                        df = pd.DataFrame(list(usa_data.items()), columns=['date', 'value'])
+                        df['date'] = pd.to_datetime(df['date'], format='%Y')
+                        df['value'] = pd.to_numeric(df['value'])
+                except Exception as e:
+                    st.warning("Parsing failed (Data structure mismatch).")
+            else:
+                st.error(f"❌ FAIL: Status {r.status_code}")
+
+        # ==========================================
+        # PATH D: OECD (STRICT)
+        # ==========================================
         else:
-            st.error(f"❌ FAIL: Connection Refused (Status {response.status_code})")
-            st.stop() # Stop the app if we can't connect
+            url = dataset_id
+            st.markdown(f"`Requesting: {url}`")
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+            r = requests.get(url, headers=headers, verify=False, timeout=15)
             
+            if r.status_code == 200:
+                st.success("✅ Connection Successful")
+                raw_json = r.json()
+                st.warning("⚠️ SDMX-JSON received. Parsing disabled in Strict Mode.")
+            elif r.status_code == 403:
+                st.error("❌ FAIL: Access Denied (403). Server blocked the script.")
+            else:
+                st.error(f"❌ FAIL: Status {r.status_code}")
+
     except Exception as e:
-        st.error(f"❌ FAIL: System Error - {e}")
-        st.stop()
+        st.error(f"❌ System Error: {e}")
 
-    st.divider()
-
-    # 2. TEST COMPLETENESS
-    st.subheader("2. Completeness Test (Dimensionality)")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    # Check A: Temporal
-    has_time = 'date' in df.columns
-    col1.metric("Temporal Resolution", "Found" if has_time else "Missing", border=True)
-    
-    # Check B: Geospatial (Lat/Long)
-    # FRED is known to fail this, so we check for it explicitly
-    has_geo = any(col in df.columns for col in ['lat', 'long', 'latitude', 'country_code'])
-    if has_geo:
-        col2.success("Geospatial: FOUND")
-    else:
-        col2.error("Geospatial: MISSING")
+    # ==========================================
+    # 2. RESTORED COMPLETENESS TEST
+    # ==========================================
+    if df is not None and not df.empty:
+        st.divider()
+        st.subheader("2. Completeness Test (Dimensionality)")
         
-    # Check C: Network (Relational)
-    # We check if there are "Source" and "Target" columns
-    has_network = any(col in df.columns for col in ['to', 'from', 'partner'])
-    if has_network:
-        col3.success("Network Depth: FOUND")
-    else:
-        col3.error("Network Depth: MISSING")
+        c1, c2, c3 = st.columns(3)
         
-    st.info(f"📝 **Verdict:** {'Strong Timeline Candidate' if has_time else 'Incomplete'}. " 
-            f"{'Fails Map/Network Requirements.' if not has_geo and not has_network else 'Good for Map/Network.'}")
+        # A. Temporal
+        has_time = 'date' in df.columns or 'timestamp' in df.columns
+        c1.metric("⏱️ Temporal", "Found" if has_time else "Missing", border=True)
+        
+        # B. Geospatial
+        geo_cols = ['lat', 'long', 'latitude', 'country', 'geo_code']
+        has_geo = any(col in df.columns for col in geo_cols)
+        if has_geo: c2.success("🌍 **Geospatial: FOUND**") 
+        else: c2.metric("🌍 Geospatial", "Missing", border=True)
+        
+        # C. Network
+        net_cols = ['from', 'to', 'source', 'target']
+        has_net = any(col in df.columns for col in net_cols)
+        if has_net: c3.success("🕸️ **Network: FOUND**")
+        else: c3.metric("🕸️ Network", "Missing", border=True)
+        
+        # VERDICT
+        st.info(f"📝 **Verdict:** Validated schema: {list(df.columns)}")
 
-    st.divider()
+        # ==========================================
+        # 3. VISUAL POTENTIAL
+        # ==========================================
+        st.divider()
+        st.subheader("3. Visual Potential")
+        
+        # Metrics
+        m1, m2 = st.columns(2)
+        m1.metric("Rows Returned", len(df))
+        m2.metric("Latest Date", str(df['date'].max().date()) if 'date' in df.columns else "N/A")
+        
+        # Chart
+        try:
+            fig = px.line(df, x='date', y='value', title=f"Actual Data: {selected_label}")
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.warning("Chart generation failed.")
+            st.dataframe(df.head())
 
-    # 3. TEST VISUAL POTENTIAL
-    st.subheader("3. Visual Potential (Aesthetics & Physics)")
-    
-    # Metric: Volatility (Standard Deviation)
-    volatility = df['value'].std()
-    recent_val = df['value'].iloc[-1]
-    last_date = df['date'].iloc[-1].strftime('%Y-%m-%d')
-    
-    # Determine Update Frequency based on date gaps
-    df['days_diff'] = df['date'].diff().dt.days
-    avg_gap = df['days_diff'].mean()
-    
-    if avg_gap <= 1:
-        freq_label = "Daily (High Velocity)"
-        freq_color = "green"
-    elif avg_gap <= 31:
-        freq_label = "Monthly (Medium Velocity)"
-        freq_color = "orange"
-    else:
-        freq_label = "Annual/Quarterly (Low Velocity)"
-        freq_color = "red"
-
-    # Display Metrics
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Latest Update", last_date)
-    m2.metric("Data Volatility", f"{volatility:.2f}")
-    m3.markdown(f"**Update Rate:** :{freq_color}[{freq_label}]")
-
-    # The Visual Proof (Chart)
-    st.markdown("##### Visual Simulation")
-    fig = px.line(df, x='date', y='value', title=f"Visual Output Simulation: {series_id}")
-    st.plotly_chart(fig, use_container_width=True)
-    
-    if freq_color == "red":
-        st.warning("⚠️ **Warning:** This data is too slow for a real-time 'Attractor' mode. Use only for 'Context' mode.")
-    elif freq_color == "green":
-        st.success("🚀 **Success:** High-frequency data detected. Suitable for 'Live Pulse' visualization.")
-
-elif run_test and not api_key:
-    st.warning("⚠️ Please enter a FRED API Key to run the test.")
+    # ==========================================
+    # RAW INSPECTOR
+    # ==========================================
+    elif raw_json is not None:
+        st.divider()
+        st.subheader("Raw Response Inspector")
+        st.json(raw_json)
