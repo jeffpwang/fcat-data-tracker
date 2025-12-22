@@ -26,8 +26,8 @@ Validates potential data sources against three core criteria:
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/your-org/data-source-validator.git](https://github.com/your-org/data-source-validator.git)
-    cd data-source-validator
+    git clone https://github.com/jeffpwang/fcat-data-tracker.git
+    cd fcat-data-tracker
     ```
 
 2.  **Install dependencies:**
