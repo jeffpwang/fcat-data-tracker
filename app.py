@@ -16,7 +16,8 @@ CUSTOM_INPUT_CONFIG = {
     "ecb": {"label": "Enter ECB Series Key:", "placeholder": "e.g., ICP.M.U2.N.000000.4.ANR"},
     "coingecko": {"label": "Enter Coin ID (Slug):", "placeholder": "e.g., bitcoin"},
     "imf": {"label": "Paste IMF API Link:", "placeholder": "http://dataservices.imf.org/REST/SDMX_JSON.svc/..."},
-    "oecd": {"label": "Paste Developer API URL:", "placeholder": "https://sdmx.oecd.org/..."}
+    "oecd": {"label": "Paste Developer API URL:", "placeholder": "https://sdmx.oecd.org/..."},
+    "census": {"label": "Paste Census API URL:", "placeholder": "https://api.census.gov/data/..."}
 }
 
 def main():

@@ -97,8 +97,8 @@ def render_completeness(df: pd.DataFrame):
     
     dimensions = {
         "Temporal": ["date", "year", "time", "timestamp"],
-        "Geospatial": ["iso", "country", "lat", "lon", "source"],
-        "Quantitative": ["value", "price", "count", "gdp", "index", "obs_value"],
+        "Geospatial": ["iso", "country", "lat", "lon", "source", "state", "county", "fips", "name", "region"],
+        "Quantitative": ["value", "price", "count", "gdp", "index", "obs_value", "p1_001n", "estimate"],
         "Relational": ["source", "target", "partner"]
     }
     

@@ -53,4 +53,12 @@ DATA_CATALOG = {
             "USD/EUR Exchange Rate": "EXR.D.USD.EUR.SP00.A"
         }
     },
+    "US Census": {
+        "type": "census",
+        "datasets": {
+            "Population by State (2020)": "https://api.census.gov/data/2020/dec/pl?get=NAME,P1_001N&for=state:*",
+            "Median Income by County (2021)": "https://api.census.gov/data/2021/acs/acs1/profile?get=NAME,DP03_0062E&for=county:*",
+            "Poverty Rate by State": "https://api.census.gov/data/timeseries/poverty/saipe?get=NAME,SAEPOVRTALL_PT&for=state:*&time=2021"
+        }
+    }
 }
